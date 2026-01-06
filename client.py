@@ -21,7 +21,7 @@ def unpack_server_payload(data):
 
 
 def get_suit_char(suit_int):
-    return ["H", "D", "C", "S"][suit_int]
+    return ["Heart", "Diamond", "Clubs", "Spades"][suit_int]
 
 
 def get_rank_str(rank_int):
@@ -31,21 +31,24 @@ def get_rank_str(rank_int):
     if rank_int == 13: return "King"
     return str(rank_int)
 
-def calculate_hand(ranks):
+def calculate_hand(cards):
     """
     Calculate the total value of a hand based on card ranks.
-    :param ranks: list of card ranks (integers)
+    :param cards: list of card ranks (integers)
     :return: total value of the hand (integer)
     """
     total = 0
-    for r in ranks:
-        if r == 1:
+    for card in cards:
+        if card[0] == 1:
             total += 11  # Ace
-        elif r >= 11:
+        elif card[0] >= 11:
             total += 10  # J, Q, K
         else:
-            total += r  # 2-10
+            total += card[0]  # 2-10
     return total
+
+def print_hand(cards, owner):
+    return f"\n{owner} Hand: " + ", ".join(f"{get_rank_str(card[0])} of {get_suit_char(card[1])}" for card in cards)
 
 
 def client_main(name="Team_Agado"):
@@ -92,13 +95,14 @@ def client_main(name="Team_Agado"):
             req_pkt = struct.pack("!IBB32s", MAGIC_COOKIE, 0x3, rounds, name_bytes)
             tcp_sock.sendall(req_pkt)
 
-            game_history = []
+            wins=0
+            ties=0
             # --- Game Loop ---
             for r in range(rounds):
                 print(f"\n--- Round {r + 1} ---")
 
-                player_ranks = []
-                dealer_ranks = []
+                player_cards = []
+                dealer_cards = []
 
                 # Receive initial cards (Player 1, Player 2, Dealer 1)
                 # We expect 3 packets of 9 bytes each
@@ -106,16 +110,17 @@ def client_main(name="Team_Agado"):
                     data = tcp_sock.recv(9)
                     res, rank, suit = unpack_server_payload(data)
                     print(f"Your card: {get_rank_str(rank)} of {get_suit_char(suit)}")
-                    if i < 2:
-                        player_ranks.append(rank)
-                    if i == 2:
-                        dealer_ranks.append(rank)
+                    player_cards.append((rank, suit))
 
-                print(f"Your hand total: {calculate_hand(player_ranks)}")
+
+
+                print(f"Your hand total: {calculate_hand(player_cards)}\n")
 
                 data = tcp_sock.recv(9)
                 res, rank, suit = unpack_server_payload(data)
-                print(f"Dealer card: {get_rank_str(rank)} of {get_suit_char(suit)}")
+                print(f"Dealer first card: {get_rank_str(rank)} of {get_suit_char(suit)}")
+                print(f"Dealer second card is hidden.\n{'-'*30}\n")
+                dealer_cards.append((rank, suit))
 
                 # Player turn
                 game_over = False
@@ -125,6 +130,11 @@ def client_main(name="Team_Agado"):
                         game_over = True
                         break
 
+                    if calculate_hand(player_cards) > 19:
+                        decision = b"Stand"
+                        tcp_sock.sendall(pack_client_decision(decision))
+                        break
+                        
                     choice = input("Type 'h' to Hit, 's' to Stand: ").lower()
                     if choice == 'h':
                         decision = b"Hittt"
@@ -135,7 +145,10 @@ def client_main(name="Team_Agado"):
                         res, rank, suit = unpack_server_payload(data)
 
                         if rank != 0:
+                            player_cards.append((rank, suit))
                             print(f"You drew: {get_rank_str(rank)} of {get_suit_char(suit)}")
+                            print(f"Your hand total: {calculate_hand(player_cards)}\n")
+
 
                     elif choice == 's':
                         decision = b"Stand"
@@ -144,33 +157,54 @@ def client_main(name="Team_Agado"):
 
 
                 # Wait for Dealer sequence and final result
-                while not game_over:
-                    data = tcp_sock.recv(9)
-                    if not data: break
-                    res, rank, suit = unpack_server_payload(data)
+                while True:
+                    if not game_over:
+                        data = tcp_sock.recv(9)
+                        if not data: break
+                        res, rank, suit = unpack_server_payload(data)
 
                     if res != 0:  # Game ended (Win/Loss/Tie)
                         if res == 2:
-                            print(f"Dealer have total value of {calculate_hand(dealer_ranks)}")
-                            print("You Lost!")
+                            if calculate_hand(player_cards) > 21:
+                                print("You Busted!")
+                            else:
+                                print(print_hand(dealer_cards, "Dealer"))
+                                print(f"Dealer have total value of {calculate_hand(dealer_cards)}")
+                                print(f"Your hand total: {calculate_hand(player_cards)}\n")
+                                print("You Lost!")
                         elif res == 3:
-                            print(f"Dealer have total value of {calculate_hand(dealer_ranks)}")
+                            wins+=1
+                            print(print_hand(dealer_cards, "Dealer"))
+                            print(f"Dealer have total value of {calculate_hand(dealer_cards)}\n")
                             print("You Won!")
+
                         elif res == 1:
-                            print(f"Dealer have total value of {calculate_hand(dealer_ranks)}")
+                            ties+=1
+                            print(print_hand(dealer_cards, "Dealer"))
+                            print(f"Dealer have total value of {calculate_hand(dealer_cards)}\n")
                             print("Tie!")
-                        game_over = True
+
+                        print("Round over.\n")
+                        break
                     else:
                         # Dealer drew a card
-                        if len(dealer_ranks) == 1:
+                        if len(dealer_cards) == 1:
                             print(f"Dealer reveals hidden card: {get_rank_str(rank)} of {get_suit_char(suit)}")
                         else:
                             print(f"Dealer draw: {get_rank_str(rank)} of {get_suit_char(suit)}")
 
-                        dealer_ranks.append(rank)
+                        dealer_cards.append((rank, suit))
 
+            if wins == rounds:
+                print(f"Congratulations! You won all {rounds} rounds!")
+            elif wins == 0 and ties == 0:
+                print(f"Unfortunately, you lost all {rounds} rounds. Never play again!")
+            else:
+                print(f"Game over! You won {wins} rounds, lost {rounds-wins-ties} rounds and tied {ties} rounds out of {rounds}.")
 
-            print("All rounds finished. Disconnecting.")
+            print("All rounds finished. Disconnecting.\n")
+            print("You Won ")
+
             tcp_sock.close()
             # Loop back to UDP listening
 

@@ -16,7 +16,7 @@ TIE = 0x1
 LOSS = 0x2
 WIN = 0x3
 
-SUITS = ["H", "D", "C", "S"]
+SUITS = ["Heart", "Diamond", "Clubs", "Spades"]
 
 
 class Card:
