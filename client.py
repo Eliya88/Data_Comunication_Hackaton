@@ -60,22 +60,20 @@ def print_hand(cards, owner):
 
 
 def client_main():
-    team_name = "Team Tim"
-
-    # Enable reuse port for testing multiple clients on same machine
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    except AttributeError:
-        # Some OS (like Windows) don't support SO_REUSEPORT, use SO_REUSEADDR
-        udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    udp_sock.bind(("", UDP_PORT))
-
-    print("Client started...")
+    team_name = "Team Ido"
 
     while True:
+        # Enable reuse port for testing multiple clients on same machine
+        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
+            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except AttributeError:
+            # Some OS (like Windows) don't support SO_REUSEPORT, use SO_REUSEADDR
+            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        udp_sock.bind(("", UDP_PORT))
+        try:
+
             print("Client started, listening for offer requests...")
             # Wait for Offer
             data, addr = udp_sock.recvfrom(1024)
@@ -87,7 +85,7 @@ def client_main():
                 continue
 
             s_name = server_name.decode('utf-8').strip('\x00')
-            print(f"Received offer from s_name at {addr[0]}, attempting to connect...")
+            print(f"Received offer from server at {addr[0]}, attempting to connect...")
 
             # Connect TCP
             tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
