@@ -53,7 +53,7 @@ def calculate_hand(cards):
         total -= 10
         aces -= 1
 
-    return total
+    return (total, aces)
 
 def print_hand(cards, owner):
     return f"\n{owner} Hand: " + ", ".join(f"{get_rank_str(card[0])} of {get_suit_char(card[1])}" for card in cards)
@@ -126,7 +126,11 @@ def client_main():
                     print(f"Your card: {get_rank_str(rank)} of {get_suit_char(suit)}")
                     player_cards.append((rank, suit))
 
-                print(f"Your hand total: {calculate_hand(player_cards)}\n")
+                hand, ace = calculate_hand(player_cards)
+                if ace == 0:
+                    print(f"Your hand total: {hand}\n")
+                else:
+                    print(f"Your hand total is: {hand} or {hand - 10}\n")
 
                 data = tcp_sock.recv(9)
                 package = unpack_server_payload(data)
@@ -145,9 +149,10 @@ def client_main():
                         game_over = True
                         break
 
-                    hand = calculate_hand(player_cards)
+                    hand, _ = calculate_hand(player_cards)
                     if hand == 21:
-                        print("Blackjack! You have 21.")
+                        if len(player_cards) == 2:
+                            print("Blackjack! You have 21.")
                         tcp_sock.sendall(pack_client_decision(b"Stand"))
                         break
 
@@ -168,8 +173,12 @@ def client_main():
                         if rank != 0:
                             player_cards.append((rank, suit))
                             print(f"You drew: {get_rank_str(rank)} of {get_suit_char(suit)}")
-                            print(f"Your hand total: {calculate_hand(player_cards)}\n")
-                            if calculate_hand(player_cards) > 21:
+                            hand, ace = calculate_hand(player_cards)
+                            if ace == 0:
+                                print(f"Your hand total: {hand}\n")
+                            else:
+                                print(f"Your hand total is: {hand} or {hand - 10}\n")
+                            if hand > 21:
                                 game_over = True
 
 
@@ -189,23 +198,24 @@ def client_main():
 
                     if res != 0:  # Game ended (Win/Loss/Tie)
                         if res == 2:
-                            if calculate_hand(player_cards) > 21:
+                            hand, ace = calculate_hand(player_cards)
+                            if hand > 21:
                                 print("You Busted!")
                             else:
                                 print(print_hand(dealer_cards, "Dealer"))
-                                print(f"Dealer have total value of {calculate_hand(dealer_cards)}")
-                                print(f"Your hand total: {calculate_hand(player_cards)}\n")
+                                print(f"Dealer have total value of {calculate_hand(dealer_cards)[0]}")
+                                print(f"Your hand total: {hand}\n")
                                 print("You Lost!")
                         elif res == 3:
                             wins+=1
                             print(print_hand(dealer_cards, "Dealer"))
-                            print(f"Dealer have total value of {calculate_hand(dealer_cards)}\n")
+                            print(f"Dealer have total value of {calculate_hand(dealer_cards)[0]}\n")
                             print("You Won!")
 
                         elif res == 1:
                             ties+=1
                             print(print_hand(dealer_cards, "Dealer"))
-                            print(f"Dealer have total value of {calculate_hand(dealer_cards)}\n")
+                            print(f"Dealer have total value of {calculate_hand(dealer_cards)[0]}\n")
                             print("Tie!")
 
                         print("Round over.\n")
