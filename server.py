@@ -21,33 +21,36 @@ SUITS = ["Heart", "Diamond", "Clubs", "Spades"]
 
 class Card:
     def __init__(self, rank, suit):
-        self.rank = rank
-        self.suit = suit
+        self.__rank = int(rank)
+        self.__suit = int(suit)
 
-    def value(self):
+    def get_rank(self):
         # Ace is 11, Face cards are 10
-        if self.rank >= 11: return 10
-        return self.rank
+        if self.__rank >= 11: return 10
+        return self.__rank
+
+    def get_suit(self):
+        return self.__suit
 
     def __str__(self):
-        r_str = {1: 'A', 11: 'J', 12: 'Q', 13: 'K'}.get(self.rank, str(self.rank))
-        return f"{r_str}{SUITS[self.suit]}"
+        r_str = {1: 'Ace', 11: 'Jak', 12: 'Queen', 13: 'King'}.get(self.__rank, str(self.__rank))
+        return f"{r_str} of {SUITS[self.__suit]}"
 
 
 def calculate_hand_value(cards):
     """
-    מחשב את ערך היד בצורה חכמה (אס יכול להיות 1 או 11).
+    Calculate the total value of a hand based on card ranks.
     """
     total = 0
     aces = 0
     for card in cards:
-        if card.rank == 1:
+        rank = card.get_rank()
+        if rank == 1:
             aces += 1
             total += 11
         else:
-            total += card.rank
-
-    # אם עברנו את 21 ויש לנו אסים, נהפוך אותם מ-11 ל-1
+            total += rank
+    # Adjust for aces if bust
     while total > 21 and aces > 0:
         total -= 10
         aces -= 1
@@ -65,8 +68,8 @@ def pack_server_payload(result, card=None):
     Server -> Client Packet Structure (9 bytes):
     Magic Cookie (4), Type (1), Result (1), Rank (2), Suit (1)
     """
-    rank = card.rank if card else 0
-    suit = card.suit if card else 0
+    rank = card.get_rank() if card else 0
+    suit = card.get_suit() if card else 0
     # ! = Network (Big Endian), I = Int(4), B = Char(1), B = Char(1), H = Short(2), B = Char(1)
     return struct.pack("!IBBHB", MAGIC_COOKIE, PAYLOAD_TYPE, result, rank, suit)
 
@@ -82,30 +85,43 @@ def unpack_client_payload(data):
     except struct.error:
         return None, None, None
 
-
 def handle_client(conn, addr):
-    print(f"Client connected from {addr}")
-    conn.settimeout(60.0)  # Timeout generous for gameplay ???????
+    team_name = "Unknown"
+    round_num = 0
 
+    def game_log(message):
+        if round_num:
+            print(f"[Team: {team_name}, Round: {round_num}] {message}")
+        else:
+            print(f"[Client {addr}] {message}")
+
+    game_log(f"Client connected from {addr}")
+
+    conn.settimeout(120.0)
     try:
-        # 1. Receive Request (Header + Name)
-        # Request: Cookie(4), Type(1), Rounds(1), Name(32) = 38 bytes
-        req_data = conn.recv(38)
+        try:
+            # Receive Request (Header + Name)
+            # Cookie(4), Type(1), Rounds(1), Name(32) = 38 bytes
+            req_data = conn.recv(38)
+        except socket.timeout:
+            game_log("Timeout waiting for handshake data.")
+            return
         if not req_data or len(req_data) < 38:
-            print("Error During Handshake - Corrupted data")
+            game_log("Error During Handshake - Corrupted data")
             return
 
-        cookie, mtype, num_rounds, team_name = struct.unpack("!IBB32s", req_data)
+        cookie, mtype, num_rounds, team_name_b = struct.unpack("!IBB32s", req_data)
         if cookie != MAGIC_COOKIE or mtype != REQUEST_TYPE:
-            print("Error During Handshake - Invalid cookie or type")
+            game_log("Error During Handshake - Invalid cookie or type")
             return
 
-        team_name = team_name.decode('utf-8').strip('\x00')
-        print(f"Game starting with {team_name} for {num_rounds} rounds.")
+        team_name = team_name_b.decode('utf-8').strip('\x00')
+        game_log(f"Game starting with {team_name} for {num_rounds} rounds.")
+
         total_wins = 0
-        # --- Game Loop ---
+        # Game Loop
         for round_num in range(1, num_rounds + 1):
-            print(f"--- Round {round_num} with {team_name} ---")
+            print(f"             --- Start Round {round_num} ---")
             deck = create_deck()
             player_hand = []
             dealer_hand = []
@@ -121,8 +137,8 @@ def handle_client(conn, addr):
             d_card2 = deck.pop()  # Hidden
             dealer_hand.extend([d_card1, d_card2])
 
-            print(f"{team_name} dealt: {card1}, {card2}")
-            print(f"Dealer dealt: {d_card1}, [Hidden]")
+            game_log(f"Dealt: {card1}, {card2}")
+            game_log(f"Dealer dealt: {d_card1} [Hidden]\n")
 
             # Send initial cards to client
             try:
@@ -132,7 +148,7 @@ def handle_client(conn, addr):
                 # Send Dealer's FIRST card only
                 conn.sendall(pack_server_payload(ROUND_NOT_OVER, d_card1))
             except socket.error as e:
-                print(f"Error sending initial cards to {team_name}: {e}")
+                game_log(f"Error sending initial cards: {e}")
                 return
 
             # --- Player's Turn ---
@@ -142,11 +158,11 @@ def handle_client(conn, addr):
                     # Wait for player decision
                     data = conn.recv(10)
                 except socket.timeout:
-                    print(f"Timeout waiting for {team_name}'s decision.")
+                    game_log(f"Timeout waiting for decision.")
                     return
 
                 if not data:
-                    print(f"Connection lost with {team_name}.")
+                    game_log(f"Connection lost.")
                     return
 
                 # Parse decision
@@ -155,18 +171,18 @@ def handle_client(conn, addr):
                 if cookie != MAGIC_COOKIE: continue
 
                 decision = decision_bytes.decode('utf-8')
-                print(f"{team_name} chose to: {decision}")
+                game_log(f"Chose to: {decision}")
 
                 if decision == "Hittt":
                     new_card = deck.pop()
                     player_hand.append(new_card)
-                    print(f"{team_name} drew: {new_card}")
+                    game_log(f"Drew: {new_card}\n")
 
                     # Check value immediately
                     p_val = calculate_hand_value(player_hand)
 
                     if p_val > 21:
-                        print(f"{team_name} BUSTED with value {p_val}!")
+                        game_log(f"BUSTED with value {p_val}!")
                         # BUST! Send the card AND the Loss result together
                         conn.sendall(pack_server_payload(LOSS, new_card))
                         player_busted = True
@@ -183,20 +199,20 @@ def handle_client(conn, addr):
             if not player_busted:
                 # Reveal hidden card (Send it to client)
                 # Note: Protocol doesn't have "Reveal" type, so we send it as a card update
-                print(f"Dealer reveals hidden card: {d_card2}")
+                game_log(f"Dealer reveals hidden card: {d_card2}")
                 conn.sendall(pack_server_payload(ROUND_NOT_OVER, d_card2))
 
                 # Dealer logic: Hit until >= 17
                 while calculate_hand_value(dealer_hand) < 17:
                     new_card = deck.pop()
                     dealer_hand.append(new_card)
-                    print(f"Dealer draws: {new_card}")
+                    game_log(f"Dealer draws: {new_card}\n")
                     conn.sendall(pack_server_payload(ROUND_NOT_OVER, new_card))
 
                 # Calculate Winner
                 p_sum = calculate_hand_value(player_hand)
                 d_sum = calculate_hand_value(dealer_hand)
-                print(f"{team_name} final value: {p_sum}, Dealer final value: {d_sum}")
+                game_log(f"Final value: {p_sum}  |  Dealer final value: {d_sum}")
 
                 if d_sum > 21:  # Dealer bust
                     result = WIN
@@ -208,15 +224,15 @@ def handle_client(conn, addr):
                 # Send Final Result (No card attached)
                 conn.sendall(pack_server_payload(result, None))
                 if result == WIN:
-                    print(f"{team_name} WINS the round!")
+                    game_log(f"Player WINS the round!")
                     total_wins += 1
-        print(f"Game over for {team_name}. Total Wins: {total_wins} out of {num_rounds}")
+        game_log(f"Game over. Total Wins: {total_wins} out of {num_rounds}\n")
 
     except Exception as e:
-        print(f"Error handling client {addr}: {e}")
+        game_log(f"Error handling client {addr}: {e}")
     finally:
         conn.close()
-        print(f"Client {addr} closed.")
+        game_log(f"Client {addr} closed.")
 
 
 def udp_broadcast(tcp_port):
